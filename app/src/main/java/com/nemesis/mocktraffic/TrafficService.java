@@ -30,7 +30,6 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -45,8 +44,10 @@ import okhttp3.Call;
 import okhttp3.Callback;
 import okhttp3.Dns;
 import okhttp3.HttpUrl;
+import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
+import okhttp3.RequestBody;
 import okhttp3.Response;
 import okhttp3.dnsoverhttps.DnsOverHttps;
 
@@ -68,10 +69,13 @@ public class TrafficService extends Service {
     private Random random = new Random();
     private static final int LOG_CLEAN_INTERVAL = 30000;
     private static final int MAX_LAST_URLS = 5;
-    private static final int MIN_DELAY_MS = 3000;
-    private static final int MAX_DELAY_MS = 25000;
-    private static final int MAX_RESOURCES = 3;
+    private static final int MIN_PAGE_DELAY_MS = 10000;
+    private static final int MAX_PAGE_DELAY_MS = 30000;
+    private static final int MIN_RESOURCE_DELAY_MS = 100;
+    private static final int MAX_RESOURCE_DELAY_MS = 1000;
+    private static final int MAX_RESOURCES = 10;
     private static final long MAX_RESOURCE_SIZE = 1_000_000;
+    private static final String TRACKER_URL = "https://www.google-analytics.com/collect";
 
     private static final List<String> DOH_PROVIDERS = Arrays.asList(
             "https://dns.google/resolve",
@@ -107,13 +111,22 @@ public class TrafficService extends Service {
         OkHttpClient.Builder builder = new OkHttpClient.Builder()
                 .cache(null);
 
-        if (dohEnabled && testDohProvider(selectedDohProvider)) {
-            builder.dns(new DnsOverHttps.Builder()
-                    .client(new OkHttpClient())
-                    .url(HttpUrl.parse(selectedDohProvider))
-                    .build());
-        } else {
+        if (dohEnabled) {
+            for (String provider : DOH_PROVIDERS) {
+                if (testDohProvider(provider)) {
+                    builder.dns(new DnsOverHttps.Builder()
+                            .client(new OkHttpClient())
+                            .url(HttpUrl.parse(provider))
+                            .build());
+                    prefs.edit().putString("doh_provider", provider).apply();
+                    Log.d("TrafficService", "Using DoH provider: " + provider);
+                    break;
+                }
+            }
+        }
+        if (builder.dns() == null) {
             builder.dns(Dns.SYSTEM);
+            Log.d("TrafficService", "Using system DNS");
         }
 
         httpClient = builder.build();
@@ -135,6 +148,7 @@ public class TrafficService extends Service {
             response.close();
             return isSuccessful;
         } catch (IOException e) {
+            Log.e("TrafficService", "DoH provider test failed for: " + providerUrl, e);
             return false;
         }
     }
@@ -142,7 +156,7 @@ public class TrafficService extends Service {
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
-                CHANNEL_ID, "Traffic Service Channel", NotificationManager.IMPORTANCE_LOW);
+                    CHANNEL_ID, "Traffic Service Channel", NotificationManager.IMPORTANCE_LOW);
             channel.setDescription("Channel for Traffic Generation Service");
             NotificationManager notificationManager = getSystemService(NotificationManager.class);
             if (notificationManager != null) {
@@ -190,15 +204,16 @@ public class TrafficService extends Service {
 
     private void startTraffic() {
         if (urlsToVisit.isEmpty()) {
+            Log.e("TrafficService", "No URLs to visit.");
             stopSelf();
             return;
         }
-        scheduler.schedule(trafficRunnable, getDelay(), TimeUnit.MILLISECONDS);
-        scheduleLogCleaning();
+        scheduler.schedule(trafficRunnable, getDelay(false), TimeUnit.MILLISECONDS);
     }
 
     private void stopTraffic() {
         scheduler.shutdownNow();
+        Log.d("TrafficService", "Traffic generation stopped.");
     }
 
     private Runnable trafficRunnable = new Runnable() {
@@ -206,7 +221,13 @@ public class TrafficService extends Service {
         public void run() {
             if (isTrafficEnabled && !urlsToVisit.isEmpty()) {
                 String urlToVisit = urlsToVisit.get(random.nextInt(urlsToVisit.size()));
-                makeHttpRequest(urlToVisit);
+                makeHttpRequest(urlToVisit, true);
+                if (random.nextInt(100) < 20) { // 20% шанс POST-запроса
+                    makePostRequest(urlToVisit);
+                }
+                if (random.nextInt(100) < 30) { // 30% шанс трекер-запроса
+                    makeTrackerRequest();
+                }
                 synchronized (lastVisitedUrls) {
                     lastVisitedUrls.add(urlToVisit);
                     if (lastVisitedUrls.size() > MAX_LAST_URLS) {
@@ -214,40 +235,122 @@ public class TrafficService extends Service {
                     }
                     broadcastStats();
                 }
-                scheduler.schedule(this, getDelay(), TimeUnit.MILLISECONDS);
+                scheduler.schedule(this, getDelay(false), TimeUnit.MILLISECONDS);
             } else {
+                Log.d("TrafficService", "Traffic generation stopped or no URLs.");
                 stopSelf();
             }
         }
     };
 
-    private long getDelay() {
-        int base = 10000;
-        int variation = random.nextInt(7000) - 2000;
-        return Math.max(MIN_DELAY_MS, Math.min(MAX_DELAY_MS, base + variation));
+    private long getDelay(boolean isResource) {
+        if (isResource) {
+            return random.nextInt(MAX_RESOURCE_DELAY_MS - MIN_RESOURCE_DELAY_MS) + MIN_RESOURCE_DELAY_MS;
+        }
+        int base = 20000; // Среднее 20 секунд для страниц
+        int variation = random.nextInt(10000) - 5000; // ±5 секунд
+        return Math.max(MIN_PAGE_DELAY_MS, Math.min(MAX_PAGE_DELAY_MS, base + variation));
     }
 
-    private void makeHttpRequest(final String url) {
-        if (!url.startsWith("https://")) return;
+    private void makeHttpRequest(final String url, boolean isMainRequest) {
+        if (!url.startsWith("https://")) {
+            Log.e("TrafficService", "Invalid URL scheme (non-HTTPS): " + url);
+            return;
+        }
 
         String userAgent = userAgents.isEmpty() ? "Mozilla/5.0" : userAgents.get(random.nextInt(userAgents.size()));
-        Request request = new Request.Builder()
+        Request.Builder builder = new Request.Builder()
                 .url(url)
                 .header("User-Agent", userAgent)
-                .header("Accept", "text/html")
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .header("Accept-Language", "en-US,en;q=0.5")
+                .header("Accept-Encoding", "gzip, deflate, br")
                 .header("Connection", "keep-alive")
-                .build();
+                .header("Cache-Control", "max-age=0");
+        if (isMainRequest) {
+            builder.header("Referer", "https://www.google.com/");
+        }
 
-        httpClient.newCall(request).enqueue(new Callback() {
+        httpClient.newCall(builder.build()).enqueue(new Callback() {
             @Override
-            public void onFailure(Call call, IOException e) {}
+            public void onFailure(Call call, IOException e) {
+                Log.e("TrafficService", "Failed to load URL: " + url, e);
+            }
 
             @Override
             public void onResponse(Call call, Response response) throws IOException {
                 if (response.isSuccessful()) {
                     requestCount++;
-                    String html = response.body().string();
-                    loadSafeResources(url, html);
+                    Log.d("TrafficService", "Visited URL: " + url + " | Status: " + response.code());
+                    if (isMainRequest) {
+                        String html = response.body().string();
+                        loadSafeResources(url, html);
+                    }
+                }
+                response.close();
+            }
+        });
+    }
+
+    private void makePostRequest(String url) {
+        if (!url.startsWith("https://")) return;
+
+        String userAgent = userAgents.isEmpty() ? "Mozilla/5.0" : userAgents.get(random.nextInt(userAgents.size()));
+        RequestBody body = RequestBody.create("dummy=1", MediaType.parse("application/x-www-form-urlencoded"));
+        Request request = new Request.Builder()
+                .url(url)
+                .post(body)
+                .header("User-Agent", userAgent)
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .header("Accept-Language", "en-US,en;q=0.5")
+                .header("Accept-Encoding", "gzip, deflate, br")
+                .header("Connection", "keep-alive")
+                .header("Cache-Control", "max-age=0")
+                .header("Referer", urlsToVisit.get(random.nextInt(urlsToVisit.size())))
+                .build();
+
+        httpClient.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                Log.e("TrafficService", "Failed POST request: " + url, e);
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                if (response.isSuccessful()) {
+                    requestCount++;
+                    Log.d("TrafficService", "POST request to: " + url + " | Status: " + response.code());
+                }
+                response.close();
+            }
+        });
+    }
+
+    private void makeTrackerRequest() {
+        String userAgent = userAgents.isEmpty() ? "Mozilla/5.0" : userAgents.get(random.nextInt(userAgents.size()));
+        String payload = "v=1&tid=UA-123456-1&t=pageview&cid=" + random.nextInt(1000000) + "&dp=%2F";
+        RequestBody body = RequestBody.create(payload, MediaType.parse("application/x-www-form-urlencoded"));
+        Request request = new Request.Builder()
+                .url(TRACKER_URL)
+                .post(body)
+                .header("User-Agent", userAgent)
+                .header("Accept", "*/*")
+                .header("Accept-Language", "en-US,en;q=0.5")
+                .header("Accept-Encoding", "gzip, deflate, br")
+                .header("Connection", "keep-alive")
+                .build();
+
+        httpClient.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                Log.e("TrafficService", "Failed tracker request: " + TRACKER_URL, e);
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                if (response.isSuccessful()) {
+                    requestCount++;
+                    Log.d("TrafficService", "Tracker request to: " + TRACKER_URL + " | Status: " + response.code());
                 }
                 response.close();
             }
@@ -257,36 +360,68 @@ public class TrafficService extends Service {
     private void loadSafeResources(String baseUrl, String html) {
         try {
             Document doc = Jsoup.parse(html, baseUrl);
-            Elements resources = doc.select("link[href$=.css], img[src$=.png], img[src$=.jpg], img[src$=.jpeg], img[src$=.gif]");
-            List<org.jsoup.nodes.Element> resourceList = resources.stream().collect(Collectors.toList());
+            Elements resources = doc.select("link[href$=.css], img[src$=.png], img[src$=.jpg], img[src$=.jpeg], img[src$=.gif], script[src$=.js]");
+            List<org.jsoup.nodes.Element> resourceList = resources.stream().limit(MAX_RESOURCES).collect(Collectors.toList());
             Collections.shuffle(resourceList, random);
-            int count = 0;
             for (org.jsoup.nodes.Element resource : resourceList) {
-                if (count >= MAX_RESOURCES) break;
                 final String resourceUrl = resource.attr("abs:href").isEmpty() ? resource.attr("abs:src") : resource.attr("abs:href");
                 if (resourceUrl.startsWith("https://") && !isBlacklisted(resourceUrl)) {
-                    String userAgent = userAgents.get(random.nextInt(userAgents.size()));
-                    Request resourceRequest = new Request.Builder()
-                            .url(resourceUrl)
-                            .header("User-Agent", userAgent)
-                            .header("Accept", resourceUrl.endsWith(".css") ? "text/css" : "image/*")
-                            .header("Connection", "keep-alive")
-                            .build();
-                    httpClient.newCall(resourceRequest).enqueue(new Callback() {
-                        @Override
-                        public void onFailure(Call call, IOException e) {}
-
-                        @Override
-                        public void onResponse(Call call, Response response) throws IOException {
-                            String cl = response.header("Content-Length");
-                            if (response.isSuccessful() && (cl == null || Long.parseLong(cl) <= MAX_RESOURCE_SIZE)) {}
-                            response.close();
-                        }
-                    });
-                    count++;
+                    scheduler.schedule(() -> makeHttpRequest(resourceUrl, false), getDelay(true), TimeUnit.MILLISECONDS);
+                    if (resourceUrl.endsWith(".css")) {
+                        loadCssImports(resourceUrl);
+                    }
                 }
             }
-        } catch (Exception e) {}
+        } catch (Exception e) {
+            Log.e("TrafficService", "Error parsing HTML for resources", e);
+        }
+    }
+
+    private void loadCssImports(String cssUrl) {
+        Request request = new Request.Builder()
+                .url(cssUrl)
+                .header("User-Agent", userAgents.get(random.nextInt(userAgents.size())))
+                .header("Accept", "text/css")
+                .header("Connection", "keep-alive")
+                .build();
+
+        httpClient.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                Log.e("TrafficService", "Failed to load CSS: " + cssUrl, e);
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                if (response.isSuccessful()) {
+                    String cssContent = response.body().string();
+                    List<String> importUrls = extractCssImports(cssContent, cssUrl);
+                    for (String importUrl : importUrls) {
+                        if (importUrl.startsWith("https://") && !isBlacklisted(importUrl)) {
+                            scheduler.schedule(() -> makeHttpRequest(importUrl, false), getDelay(true), TimeUnit.MILLISECONDS);
+                        }
+                    }
+                }
+                response.close();
+            }
+        });
+    }
+
+    private List<String> extractCssImports(String cssContent, String baseUrl) {
+        List<String> importUrls = new ArrayList<>();
+        String[] lines = cssContent.split("\n");
+        for (String line : lines) {
+            if (line.trim().startsWith("@import")) {
+                String url = line.replaceAll(".*url\\(['\"]?([^'\"]+)['\"]?\\).*", "$1").trim();
+                if (!url.startsWith("http")) {
+                    url = HttpUrl.parse(baseUrl).resolve(url).toString();
+                }
+                if (url.startsWith("https://")) {
+                    importUrls.add(url);
+                }
+            }
+        }
+        return importUrls;
     }
 
     private void broadcastStats() {
@@ -295,10 +430,14 @@ public class TrafficService extends Service {
         intent.putExtra("requestCount", requestCount);
         intent.putStringArrayListExtra("lastUrls", new ArrayList<>(lastVisitedUrls));
         sendBroadcast(intent);
+        Log.d("TrafficService", "Broadcasted stats: " + requestCount);
     }
 
     private void scheduleLogCleaning() {
-        scheduler.schedule(() -> scheduleLogCleaning(), LOG_CLEAN_INTERVAL, TimeUnit.MILLISECONDS);
+        scheduler.schedule(() -> {
+            Log.d("TrafficService", "Log cleaned.");
+            scheduleLogCleaning();
+        }, LOG_CLEAN_INTERVAL, TimeUnit.MILLISECONDS);
     }
 
     private void loadConfigFromAssets() {
@@ -311,7 +450,9 @@ public class TrafficService extends Service {
             while ((line = reader.readLine()) != null) sb.append(line);
             reader.close();
             parseJsonConfig(sb.toString());
+            Log.d("TrafficService", "Configuration loaded successfully.");
         } catch (IOException e) {
+            Log.e("TrafficService", "Error reading config.json", e);
             stopSelf();
         }
     }
@@ -322,12 +463,16 @@ public class TrafficService extends Service {
             JSONArray blacklistedUrlsJson = jsonObject.getJSONArray("blacklisted_urls");
             JSONArray userAgentsJson = jsonObject.getJSONArray("user_agents");
 
-            for (int i = 0; i < blacklistedUrlsJson.length(); i++)
+            for (int i = 0; i < blacklistedUrlsJson.length(); i++) {
                 blacklistedUrls.add(blacklistedUrlsJson.getString(i));
-            for (int i = 0; i < userAgentsJson.length(); i++)
+            }
+            for (int i = 0; i < userAgentsJson.length(); i++) {
                 userAgents.add(userAgentsJson.getString(i));
+            }
             timeout = jsonObject.optInt("timeout", 60000);
+            Log.d("TrafficService", "Parsed config.json: " + jsonObject.toString());
         } catch (JSONException e) {
+            Log.e("TrafficService", "Error parsing config.json", e);
             stopSelf();
         }
     }
@@ -344,7 +489,9 @@ public class TrafficService extends Service {
                     urlsToVisit.add(url);
                 }
             }
-        } catch (JSONException e) {}
+        } catch (JSONException e) {
+            Log.e("TrafficService", "Error loading user URLs", e);
+        }
     }
 
     private boolean isBlacklisted(String url) {
