@@ -221,6 +221,7 @@ public class TrafficService extends Service {
 
     private void broadcastStats() {
         Intent intent = new Intent(ACTION_UPDATE_STATS);
+        intent.setPackage(getPackageName()); // Fix for UnsafeImplicitIntentLaunch
         intent.putExtra("requestCount", requestCount);
         intent.putStringArrayListExtra("lastUrls", new ArrayList<>(lastVisitedUrls));
         sendBroadcast(intent);
