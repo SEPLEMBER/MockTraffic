@@ -7,33 +7,32 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.nemesis.mocktraffic"
-        minSdk = 24
-        targetSdk = 34
-        versionCode = 2
-        versionName = "1.1"
+    applicationId = "com.nemesis.mocktraffic"
+    minSdk = 24
+    targetSdk = 34
+    versionCode = 2
+    versionName = "1.1"
 
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        dependenciesInfo {
-            includeInApk = false
-            includeInBundle = false
-        }
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
     }
+}
 
-    buildTypes {
-        release {
-            isMinifyEnabled = false
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
-        }
+buildTypes {
+    release {
+        isMinifyEnabled = true
+        proguardFiles(
+            getDefaultProguardFile("proguard-android-optimize.txt"),
+            "proguard-rules.pro"
+        )
     }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
-    }
+}
+compileOptions {
+    sourceCompatibility = JavaVersion.VERSION_1_8
+    targetCompatibility = JavaVersion.VERSION_1_8
 }
 
 dependencies {
