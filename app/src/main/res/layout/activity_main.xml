@@ -11,28 +11,44 @@
         android:layout_height="wrap_content"
         android:text="Enable Traffic Generation" />
 
+    <CheckBox
+        android:id="@+id/dohCheckBox"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Enable DNS over HTTPS (DoH)" />
+
+    <Spinner
+        android:id="@+id/dohProviderSpinner"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp" />
+
     <TextView
         android:id="@+id/statusTextView"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
         android:text="Traffic Generation Disabled" />
 
     <TextView
         android:id="@+id/trafficStatsTextView"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
         android:text="Traffic Stats: 0 requests" />
 
     <TextView
         android:id="@+id/lastUrlsTextView"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
         android:text="Last URLs: None" />
 
     <EditText
         android:id="@+id/urlInput"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
         android:hint="Enter HTTPS URL"
         android:inputType="textUri" />
 
@@ -40,12 +56,14 @@
         android:id="@+id/addUrlButton"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
         android:text="Add URL" />
 
     <Button
         android:id="@+id/clearUrlButton"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
         android:text="Clear URLs" />
 
 </LinearLayout>
