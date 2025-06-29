@@ -1,95 +1,51 @@
 <?xml version="1.0" encoding="utf-8"?>
-<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:orientation="vertical"
     android:padding="16dp">
 
-    <!-- CheckBox to enable/disable traffic generation -->
     <CheckBox
         android:id="@+id/trafficCheckBox"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Enable Traffic Generation"
-        android:layout_centerHorizontal="true"
-        android:layout_marginTop="16dp" />
+        android:text="Enable Traffic Generation" />
 
-    <!-- TextView for status -->
     <TextView
         android:id="@+id/statusTextView"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Traffic Generation Disabled"
-        android:layout_below="@id/trafficCheckBox"
-        android:layout_marginTop="16dp"
-        android:layout_centerHorizontal="true" />
+        android:text="Traffic Generation Disabled" />
 
-    <!-- TextView for traffic statistics -->
     <TextView
         android:id="@+id/trafficStatsTextView"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Traffic Stats: 0 requests"
-        android:layout_below="@id/statusTextView"
-        android:layout_marginTop="16dp"
-        android:layout_centerHorizontal="true" />
+        android:text="Traffic Stats: 0 requests" />
 
-    <!-- TextView for last visited URLs with IPs -->
     <TextView
         android:id="@+id/lastUrlsTextView"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Last Visited URLs: None"
-        android:layout_below="@id/trafficStatsTextView"
-        android:layout_marginTop="16dp"
-        android:layout_centerHorizontal="true" />
+        android:text="Last URLs: None" />
 
-    <!-- SeekBar for adjusting request speed -->
-    <SeekBar
-        android:id="@+id/speedSeekBar"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:max="9"
-        android:progress="4"
-        android:layout_below="@id/lastUrlsTextView"
-        android:layout_marginTop="16dp" />
-
-    <!-- TextView for speed display -->
-    <TextView
-        android:id="@+id/speedTextView"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Request Delay: 5s"
-        android:layout_below="@id/speedSeekBar"
-        android:layout_marginTop="8dp"
-        android:layout_centerHorizontal="true" />
-
-    <!-- EditText for URL input -->
     <EditText
         android:id="@+id/urlInput"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:hint="Enter HTTPS URL"
-        android:inputType="textUri"
-        android:layout_below="@id/speedTextView"
-        android:layout_marginTop="16dp" />
+        android:inputType="textUri" />
 
-    <!-- Button to add URL -->
     <Button
         android:id="@+id/addUrlButton"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Add URL"
-        android:layout_below="@id/urlInput"
-        android:layout_marginTop="8dp"
-        android:layout_centerHorizontal="true" />
+        android:text="Add URL" />
 
-    <!-- Button to clear URLs -->
     <Button
         android:id="@+id/clearUrlButton"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Clear URLs"
-        android:layout_below="@id/addUrlButton"
-        android:layout_marginTop="8dp"
-        android:layout_centerHorizontal="true" />
-</RelativeLayout>
+        android:text="Clear URLs" />
+
+</LinearLayout>
