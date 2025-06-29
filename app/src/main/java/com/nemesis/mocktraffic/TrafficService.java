@@ -71,7 +71,7 @@ public class TrafficService extends Service {
     private static final int MIN_DELAY_MS = 3000;
     private static final int MAX_DELAY_MS = 25000;
     private static final int MAX_RESOURCES = 3;
-    private static final long MAX_RESOURCE_SIZE = 1_000_000; // 1MB
+    private static final long MAX_RESOURCE_SIZE = 1_000_000;
 
     private static final List<String> DOH_PROVIDERS = Arrays.asList(
             "https://dns.google/resolve",
@@ -92,7 +92,6 @@ public class TrafficService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
-        Log.d("TrafficService", "Service created.");
         createNotificationChannel();
         loadConfigFromAssets();
         loadUserUrls();
@@ -113,10 +112,8 @@ public class TrafficService extends Service {
                     .client(new OkHttpClient())
                     .url(HttpUrl.parse(selectedDohProvider))
                     .build());
-            Log.d("TrafficService", "Using DoH provider: " + selectedDohProvider);
         } else {
             builder.dns(Dns.SYSTEM);
-            Log.d("TrafficService", "DoH disabled or provider unreachable, using system DNS.");
         }
 
         httpClient = builder.build();
@@ -138,38 +135,29 @@ public class TrafficService extends Service {
             response.close();
             return isSuccessful;
         } catch (IOException e) {
-            Log.e("TrafficService", "DoH provider test failed for: " + providerUrl, e);
             return false;
         }
     }
 
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            CharSequence name = "Traffic Service Channel";
-            String description = "Channel for Traffic Generation Service";
-            int importance = NotificationManager.IMPORTANCE_LOW;
-            NotificationChannel channel = new NotificationChannel(CHANNEL_ID, name, importance);
-            channel.setDescription(description);
+            NotificationChannel channel = new NotificationChannel(
+                CHANNEL_ID, "Traffic Service Channel", NotificationManager.IMPORTANCE_LOW);
+            channel.setDescription("Channel for Traffic Generation Service");
             NotificationManager notificationManager = getSystemService(NotificationManager.class);
             if (notificationManager != null) {
                 notificationManager.createNotificationChannel(channel);
-                Log.d("TrafficService", "Notification channel created.");
-            } else {
-                Log.e("TrafficService", "NotificationManager is null.");
             }
         }
     }
 
     private Notification buildNotification() {
         Intent notificationIntent = new Intent(this, MainActivity.class);
-        PendingIntent pendingIntent;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            pendingIntent = PendingIntent.getActivity(this,
-                    0, notificationIntent, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-        } else {
-            pendingIntent = PendingIntent.getActivity(this,
-                    0, notificationIntent, PendingIntent.FLAG_UPDATE_CURRENT);
-        }
+        PendingIntent pendingIntent = PendingIntent.getActivity(
+                this, 0, notificationIntent,
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ?
+                        PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT :
+                        PendingIntent.FLAG_UPDATE_CURRENT);
 
         return new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Traffic Generation Active")
@@ -182,10 +170,7 @@ public class TrafficService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        Log.d("TrafficService", "onStartCommand called.");
-        Notification notification = buildNotification();
-        startForeground(NOTIFICATION_ID, notification);
-        Log.d("TrafficService", "Foreground service started.");
+        startForeground(NOTIFICATION_ID, buildNotification());
         startTraffic();
         return START_STICKY;
     }
@@ -194,7 +179,6 @@ public class TrafficService extends Service {
     public void onDestroy() {
         unregisterReceiver(configReceiver);
         stopTraffic();
-        Log.d("TrafficService", "Service destroyed.");
         super.onDestroy();
     }
 
@@ -206,18 +190,15 @@ public class TrafficService extends Service {
 
     private void startTraffic() {
         if (urlsToVisit.isEmpty()) {
-            Log.e("TrafficService", "No URLs to visit.");
             stopSelf();
             return;
         }
         scheduler.schedule(trafficRunnable, getDelay(), TimeUnit.MILLISECONDS);
         scheduleLogCleaning();
-        Log.d("TrafficService", "Traffic generation started.");
     }
 
     private void stopTraffic() {
         scheduler.shutdownNow();
-        Log.d("TrafficService", "Traffic generation stopped.");
     }
 
     private Runnable trafficRunnable = new Runnable() {
@@ -225,11 +206,9 @@ public class TrafficService extends Service {
         public void run() {
             if (isTrafficEnabled && !urlsToVisit.isEmpty()) {
                 String urlToVisit = urlsToVisit.get(random.nextInt(urlsToVisit.size()));
-                String ipAddress = getIpAddress(urlToVisit);
-                Log.d("TrafficService", "Visiting URL: " + urlToVisit + " (" + ipAddress + ")");
                 makeHttpRequest(urlToVisit);
                 synchronized (lastVisitedUrls) {
-                    lastVisitedUrls.add(urlToVisit + " (" + ipAddress + ")");
+                    lastVisitedUrls.add(urlToVisit);
                     if (lastVisitedUrls.size() > MAX_LAST_URLS) {
                         lastVisitedUrls.remove(0);
                     }
@@ -237,61 +216,38 @@ public class TrafficService extends Service {
                 }
                 scheduler.schedule(this, getDelay(), TimeUnit.MILLISECONDS);
             } else {
-                Log.d("TrafficService", "Traffic generation stopped or no URLs.");
                 stopSelf();
             }
         }
     };
 
     private long getDelay() {
-        int base = 10000; // 10 секунд
-        int variation = random.nextInt(7000) - 2000; // -2с до +5с
+        int base = 10000;
+        int variation = random.nextInt(7000) - 2000;
         return Math.max(MIN_DELAY_MS, Math.min(MAX_DELAY_MS, base + variation));
     }
 
-    private String getIpAddress(String url) {
-        try {
-            String host = url.replace("https://", "").split("/")[0];
-            InetAddress address = InetAddress.getByName(host);
-            return address.getHostAddress();
-        } catch (Exception e) {
-            Log.e("TrafficService", "Failed to resolve IP for: " + url, e);
-            return "Unknown IP";
-        }
-    }
-
     private void makeHttpRequest(final String url) {
-        if (!url.startsWith("https://")) {
-            Log.e("TrafficService", "Invalid URL scheme (non-HTTPS): " + url);
-            return;
-        }
+        if (!url.startsWith("https://")) return;
 
         String userAgent = userAgents.isEmpty() ? "Mozilla/5.0" : userAgents.get(random.nextInt(userAgents.size()));
         Request request = new Request.Builder()
                 .url(url)
                 .header("User-Agent", userAgent)
-                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-                .header("Accept-Language", "en-US,en;q=0.5")
-                .header("Accept-Encoding", "gzip, deflate, br")
+                .header("Accept", "text/html")
                 .header("Connection", "keep-alive")
-                .header("Referer", "https://www.google.com/")
                 .build();
 
         httpClient.newCall(request).enqueue(new Callback() {
             @Override
-            public void onFailure(Call call, IOException e) {
-                Log.e("TrafficService", "Failed to load URL: " + url, e);
-            }
+            public void onFailure(Call call, IOException e) {}
 
             @Override
             public void onResponse(Call call, Response response) throws IOException {
                 if (response.isSuccessful()) {
                     requestCount++;
-                    Log.d("TrafficService", "Visited URL: " + url + " | Status: " + response.code());
                     String html = response.body().string();
                     loadSafeResources(url, html);
-                } else {
-                    Log.e("TrafficService", "Failed to visit URL: " + url + " | Status: " + response.code());
                 }
                 response.close();
             }
@@ -314,35 +270,23 @@ public class TrafficService extends Service {
                             .url(resourceUrl)
                             .header("User-Agent", userAgent)
                             .header("Accept", resourceUrl.endsWith(".css") ? "text/css" : "image/*")
-                            .header("Accept-Encoding", "gzip, deflate, br")
                             .header("Connection", "keep-alive")
-                            .header("Referer", baseUrl)
                             .build();
                     httpClient.newCall(resourceRequest).enqueue(new Callback() {
                         @Override
-                        public void onFailure(Call call, IOException e) {
-                            Log.e("TrafficService", "Failed to load resource: " + resourceUrl, e);
-                        }
+                        public void onFailure(Call call, IOException e) {}
 
                         @Override
                         public void onResponse(Call call, Response response) throws IOException {
-                            if (response.isSuccessful()) {
-                                String contentLength = response.header("Content-Length");
-                                if (contentLength != null && Long.parseLong(contentLength) > MAX_RESOURCE_SIZE) {
-                                    Log.d("TrafficService", "Skipped large resource: " + resourceUrl);
-                                    return;
-                                }
-                                Log.d("TrafficService", "Loaded resource: " + resourceUrl + " | Status: " + response.code());
-                            }
+                            String cl = response.header("Content-Length");
+                            if (response.isSuccessful() && (cl == null || Long.parseLong(cl) <= MAX_RESOURCE_SIZE)) {}
                             response.close();
                         }
                     });
                     count++;
                 }
             }
-        } catch (Exception e) {
-            Log.e("TrafficService", "Error parsing HTML for resources", e);
-        }
+        } catch (Exception e) {}
     }
 
     private void broadcastStats() {
@@ -351,14 +295,10 @@ public class TrafficService extends Service {
         intent.putExtra("requestCount", requestCount);
         intent.putStringArrayListExtra("lastUrls", new ArrayList<>(lastVisitedUrls));
         sendBroadcast(intent);
-        Log.d("TrafficService", "Broadcasted stats: " + requestCount);
     }
 
     private void scheduleLogCleaning() {
-        scheduler.schedule(() -> {
-            Log.d("TrafficService", "Log cleaned.");
-            scheduleLogCleaning();
-        }, LOG_CLEAN_INTERVAL, TimeUnit.MILLISECONDS);
+        scheduler.schedule(() -> scheduleLogCleaning(), LOG_CLEAN_INTERVAL, TimeUnit.MILLISECONDS);
     }
 
     private void loadConfigFromAssets() {
@@ -366,16 +306,12 @@ public class TrafficService extends Service {
             AssetManager assetManager = getAssets();
             InputStream inputStream = assetManager.open("config.json");
             BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
-            StringBuilder stringBuilder = new StringBuilder();
+            StringBuilder sb = new StringBuilder();
             String line;
-            while ((line = reader.readLine()) != null) {
-                stringBuilder.append(line);
-            }
+            while ((line = reader.readLine()) != null) sb.append(line);
             reader.close();
-            parseJsonConfig(stringBuilder.toString());
-            Log.d("TrafficService", "Configuration loaded successfully.");
+            parseJsonConfig(sb.toString());
         } catch (IOException e) {
-            Log.e("TrafficService", "Error reading config.json", e);
             stopSelf();
         }
     }
@@ -386,18 +322,12 @@ public class TrafficService extends Service {
             JSONArray blacklistedUrlsJson = jsonObject.getJSONArray("blacklisted_urls");
             JSONArray userAgentsJson = jsonObject.getJSONArray("user_agents");
 
-            for (int i = 0; i < blacklistedUrlsJson.length(); i++) {
+            for (int i = 0; i < blacklistedUrlsJson.length(); i++)
                 blacklistedUrls.add(blacklistedUrlsJson.getString(i));
-            }
-
-            for (int i = 0; i < userAgentsJson.length(); i++) {
+            for (int i = 0; i < userAgentsJson.length(); i++)
                 userAgents.add(userAgentsJson.getString(i));
-            }
-
             timeout = jsonObject.optInt("timeout", 60000);
-            Log.d("TrafficService", "Parsed config.json: " + jsonObject.toString());
         } catch (JSONException e) {
-            Log.e("TrafficService", "Error parsing config.json", e);
             stopSelf();
         }
     }
@@ -414,16 +344,12 @@ public class TrafficService extends Service {
                     urlsToVisit.add(url);
                 }
             }
-        } catch (JSONException e) {
-            Log.e("TrafficService", "Error loading user URLs", e);
-        }
+        } catch (JSONException e) {}
     }
 
     private boolean isBlacklisted(String url) {
         for (String blacklistedUrl : blacklistedUrls) {
-            if (url.contains(blacklistedUrl)) {
-                return true;
-            }
+            if (url.contains(blacklistedUrl)) return true;
         }
         return false;
     }
