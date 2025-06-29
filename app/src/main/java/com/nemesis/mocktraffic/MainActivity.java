@@ -15,7 +15,6 @@ import android.provider.Settings;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
-import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.util.Log;
@@ -36,7 +35,6 @@ public class MainActivity extends AppCompatActivity {
     private static final int REQUEST_IGNORE_BATTERY_OPTIMIZATIONS = 2;
     private static final String PREFS_NAME = "app_prefs";
     private static final String URLS_KEY = "user_urls";
-    private static final String SPEED_KEY = "request_speed";
 
     private CheckBox trafficCheckBox;
     private TextView trafficStatsTextView;
@@ -45,8 +43,6 @@ public class MainActivity extends AppCompatActivity {
     private EditText urlInput;
     private Button addUrlButton;
     private Button clearUrlButton;
-    private SeekBar speedSeekBar;
-    private TextView speedTextView;
 
     private BroadcastReceiver statsReceiver = new BroadcastReceiver() {
         @Override
@@ -76,8 +72,6 @@ public class MainActivity extends AppCompatActivity {
         urlInput = findViewById(R.id.urlInput);
         addUrlButton = findViewById(R.id.addUrlButton);
         clearUrlButton = findViewById(R.id.clearUrlButton);
-        speedSeekBar = findViewById(R.id.speedSeekBar);
-        speedTextView = findViewById(R.id.speedTextView);
 
         SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         boolean trafficEnabled = preferences.getBoolean("traffic_enabled", false);
@@ -86,30 +80,11 @@ public class MainActivity extends AppCompatActivity {
         int savedRequestCount = preferences.getInt("request_count", 0);
         trafficStatsTextView.setText("Traffic Stats: " + savedRequestCount + " requests");
 
-        int savedSpeed = preferences.getInt(SPEED_KEY, 1); // 0: fast, 1: medium, 2: slow
-        speedSeekBar.setMax(2);
-        speedSeekBar.setProgress(savedSpeed);
-        updateSpeedText(savedSpeed);
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQUEST_POST_NOTIFICATIONS);
             }
         }
-
-        speedSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                updateSpeedText(progress);
-                preferences.edit().putInt(SPEED_KEY, progress).apply();
-                restartTrafficService();
-            }
-
-            @Override
-            public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override
-            public void onStopTrackingTouch(SeekBar seekBar) {}
-        });
 
         addUrlButton.setOnClickListener(v -> {
             String url = urlInput.getText().toString().trim();
@@ -126,7 +101,7 @@ public class MainActivity extends AppCompatActivity {
                         preferences.edit().putString(URLS_KEY, userUrls.toString()).apply();
                         urlInput.setText("");
                         Toast.makeText(this, "URL added", Toast.LENGTH_SHORT).show();
-                        restartTrafficService();
+                        reloadTrafficService();
                     } else {
                         Toast.makeText(this, "URL already exists", Toast.LENGTH_SHORT).show();
                     }
@@ -141,7 +116,7 @@ public class MainActivity extends AppCompatActivity {
         clearUrlButton.setOnClickListener(v -> {
             preferences.edit().putString(URLS_KEY, "[]").apply();
             Toast.makeText(this, "URLs cleared", Toast.LENGTH_SHORT).show();
-            restartTrafficService();
+            reloadTrafficService();
         });
 
         trafficCheckBox.setOnCheckedChangeListener((buttonView, isChecked) -> {
@@ -182,17 +157,6 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    private void updateSpeedText(int progress) {
-        String speed;
-        switch (progress) {
-            case 0: speed = "Fast (1s)"; break;
-            case 1: speed = "Medium (3s)"; break;
-            case 2: speed = "Slow (6s)"; break;
-            default: speed = "Medium (3s)"; break;
-        }
-        speedTextView.setText("Request Speed: " + speed);
-    }
-
     private boolean containsUrl(JSONArray urls, String url) throws JSONException {
         for (int i = 0; i < urls.length(); i++) {
             if (urls.getString(i).equals(url)) {
@@ -202,16 +166,10 @@ public class MainActivity extends AppCompatActivity {
         return false;
     }
 
-    private void restartTrafficService() {
-        Intent serviceIntent = new Intent(this, TrafficService.class);
-        stopService(serviceIntent);
-        if (trafficCheckBox.isChecked()) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(serviceIntent);
-            } else {
-                startService(serviceIntent);
-            }
-        }
+    private void reloadTrafficService() {
+        Intent intent = new Intent("com.nemesis.mocktraffic.RELOAD_CONFIG");
+        intent.setPackage(getPackageName());
+        sendBroadcast(intent);
     }
 
     @Override
