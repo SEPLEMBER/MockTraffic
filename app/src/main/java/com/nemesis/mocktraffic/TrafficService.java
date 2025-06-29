@@ -111,6 +111,7 @@ public class TrafficService extends Service {
         OkHttpClient.Builder builder = new OkHttpClient.Builder()
                 .cache(null);
 
+        boolean dohConfigured = false;
         if (dohEnabled) {
             for (String provider : DOH_PROVIDERS) {
                 if (testDohProvider(provider)) {
@@ -120,11 +121,12 @@ public class TrafficService extends Service {
                             .build());
                     prefs.edit().putString("doh_provider", provider).apply();
                     Log.d("TrafficService", "Using DoH provider: " + provider);
+                    dohConfigured = true;
                     break;
                 }
             }
         }
-        if (builder.dns() == null) {
+        if (!dohConfigured) {
             builder.dns(Dns.SYSTEM);
             Log.d("TrafficService", "Using system DNS");
         }
