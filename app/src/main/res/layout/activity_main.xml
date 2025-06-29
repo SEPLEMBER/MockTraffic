@@ -33,7 +33,7 @@
         android:layout_marginTop="16dp"
         android:layout_centerHorizontal="true" />
 
-    <!-- TextView for last visited URLs -->
+    <!-- TextView for last visited URLs with IPs -->
     <TextView
         android:id="@+id/lastUrlsTextView"
         android:layout_width="wrap_content"
@@ -43,6 +43,26 @@
         android:layout_marginTop="16dp"
         android:layout_centerHorizontal="true" />
 
+    <!-- SeekBar for adjusting request speed -->
+    <SeekBar
+        android:id="@+id/speedSeekBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:max="9"
+        android:progress="4"
+        android:layout_below="@id/lastUrlsTextView"
+        android:layout_marginTop="16dp" />
+
+    <!-- TextView for speed display -->
+    <TextView
+        android:id="@+id/speedTextView"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Request Delay: 5s"
+        android:layout_below="@id/speedSeekBar"
+        android:layout_marginTop="8dp"
+        android:layout_centerHorizontal="true" />
+
     <!-- EditText for URL input -->
     <EditText
         android:id="@+id/urlInput"
@@ -50,7 +70,7 @@
         android:layout_height="wrap_content"
         android:hint="Enter HTTPS URL"
         android:inputType="textUri"
-        android:layout_below="@id/lastUrlsTextView"
+        android:layout_below="@id/speedTextView"
         android:layout_marginTop="16dp" />
 
     <!-- Button to add URL -->
