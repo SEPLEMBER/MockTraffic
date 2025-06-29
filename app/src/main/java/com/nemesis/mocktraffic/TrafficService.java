@@ -42,7 +42,6 @@ import java.util.stream.Collectors;
 
 import okhttp3.Call;
 import okhttp3.Callback;
-import okhttp3.Dns;
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -262,8 +261,7 @@ public class TrafficService extends Service {
             int count = 0;
             for (org.jsoup.nodes.Element resource : resourceList) {
                 if (count >= MAX_RESOURCES) break;
-                String resourceUrl = resource.attr("abs:href");
-                if (resourceUrl.isEmpty()) resourceUrl = resource.attr("abs:src");
+                final String resourceUrl = resource.attr("abs:href").isEmpty() ? resource.attr("abs:src") : resource.attr("abs:href");
                 if (resourceUrl.startsWith("https://") && !isBlacklisted(resourceUrl)) {
                     String userAgent = userAgents.get(random.nextInt(userAgents.size()));
                     Request resourceRequest = new Request.Builder()
