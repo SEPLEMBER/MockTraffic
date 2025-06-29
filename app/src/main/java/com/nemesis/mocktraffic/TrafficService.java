@@ -24,6 +24,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
@@ -43,6 +44,7 @@ public class TrafficService extends Service {
     private int requestCount = 0;
     private List<String> urlsToVisit = new ArrayList<>();
     private List<String> blacklistedUrls = new ArrayList<>();
+    private List<String> userAgents = new ArrayList<>();
     private List<String> lastVisitedUrls = new ArrayList<>();
     private int minSleep = 2000;
     private int maxSleep = 5000;
@@ -50,7 +52,7 @@ public class TrafficService extends Service {
     private Handler trafficHandler = new Handler();
     private Handler logCleanerHandler = new Handler();
     private OkHttpClient httpClient = new OkHttpClient.Builder()
-            .cache(null) // Отключение кеша
+            .cache(null)
             .build();
     private Random random = new Random();
     private static final int LOG_CLEAN_INTERVAL = 30000;
@@ -144,20 +146,23 @@ public class TrafficService extends Service {
     private Runnable trafficRunnable = new Runnable() {
         @Override
         public void run() {
+            SharedPreferences prefs = getSharedPreferences("app_prefs", MODE_PRIVATE);
+            int delay = prefs.getInt("request_delay", 5) * 1000;
+
             Log.d("TrafficService", "Traffic runnable started. URLs to visit: " + urlsToVisit.size());
             if (isTrafficEnabled && !urlsToVisit.isEmpty()) {
                 String urlToVisit = urlsToVisit.get(random.nextInt(urlsToVisit.size()));
-                Log.d("TrafficService", "Visiting URL: " + urlToVisit);
+                String ipAddress = getIpAddress(urlToVisit);
+                Log.d("TrafficService", "Visiting URL: " + urlToVisit + " (" + ipAddress + ")");
                 makeHttpRequest(urlToVisit);
                 synchronized (lastVisitedUrls) {
-                    lastVisitedUrls.add(urlToVisit);
+                    lastVisitedUrls.add(urlToVisit + " (" + ipAddress + ")");
                     if (lastVisitedUrls.size() > MAX_LAST_URLS) {
                         lastVisitedUrls.remove(0);
                     }
                     broadcastStats();
                 }
-                int sleepTime = random.nextInt(maxSleep - minSleep + 1) + minSleep;
-                trafficHandler.postDelayed(this, sleepTime);
+                trafficHandler.postDelayed(this, delay);
             } else {
                 Log.d("TrafficService", "Traffic generation stopped or no URLs.");
                 stopSelf();
@@ -165,14 +170,27 @@ public class TrafficService extends Service {
         }
     };
 
+    private String getIpAddress(String url) {
+        try {
+            String host = url.replace("https://", "").split("/")[0];
+            InetAddress address = InetAddress.getByName(host);
+            return address.getHostAddress();
+        } catch (Exception e) {
+            Log.e("TrafficService", "Failed to resolve IP for: " + url, e);
+            return "Unknown IP";
+        }
+    }
+
     private void makeHttpRequest(final String url) {
         if (!url.startsWith("https://")) {
             Log.e("TrafficService", "Invalid URL scheme (non-HTTPS): " + url);
             return;
         }
 
+        String userAgent = userAgents.isEmpty() ? "Mozilla/5.0" : userAgents.get(random.nextInt(userAgents.size()));
         Request request = new Request.Builder()
                 .url(url)
+                .header("User-Agent", userAgent)
                 .build();
 
         httpClient.newCall(request).enqueue(new Callback() {
@@ -248,6 +266,7 @@ public class TrafficService extends Service {
             JSONObject jsonObject = new JSONObject(jsonString);
             JSONArray rootUrls = jsonObject.getJSONArray("root_urls");
             JSONArray blacklistedUrlsJson = jsonObject.getJSONArray("blacklisted_urls");
+            JSONArray userAgentsJson = jsonObject.getJSONArray("user_agents");
 
             for (int i = 0; i < rootUrls.length(); i++) {
                 String url = rootUrls.getString(i);
@@ -260,6 +279,10 @@ public class TrafficService extends Service {
 
             for (int i = 0; i < blacklistedUrlsJson.length(); i++) {
                 blacklistedUrls.add(blacklistedUrlsJson.getString(i));
+            }
+
+            for (int i = 0; i < userAgentsJson.length(); i++) {
+                userAgents.add(userAgentsJson.getString(i));
             }
 
             minSleep = jsonObject.getInt("min_sleep");
