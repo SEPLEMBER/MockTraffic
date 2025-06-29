@@ -1,30 +1,59 @@
-# MockTraffic
-## A random DNS, HTTPS internet traffic noise generator for Android
-<!-- DESCRIPTION -->
-## Description:
+# MockTraffic: Browser-Like Traffic Generator
 
-A random DNS and HTTPS internet traffic noise generator provides enhanced privacy and security by obfuscating users' online activities. It generates random, non-user-initiated queries to DNS servers and encrypted HTTPS connections, making it difficult for third parties such as ISPs, surveillance systems, or malicious actors to analyze and track actual browsing patterns. This added layer of traffic noise reduces the effectiveness of traffic analysis and profiling techniques, making it harder to identify specific behaviors, websites, or services accessed by the user.
+## Overview
+MockTraffic is an Android app designed to generate realistic HTTP/HTTPS traffic, mimicking browser behavior. Built for studying network security, DPI analysis, and traffic obfuscation in censored environments (e.g., Russia, China, Iran, Turkey). Uses `OkHttp`, `Jsoup`, and DoH to create near-indistinguishable browser traffic.
 
-<!-- FEATURES -->
-## Features:
+## Goals
+- Simulate browser behavior (GET/POST, resources, Google Analytics).
+- Support DNS over HTTPS (DoH) with fallback to system DNS.
+- Protect against Zero-Click vulnerabilities.
+- Minimize suspicion for ISPs/DPI in censored regions.
 
-- Small codebase
+## Technical Description
 
-- Runs in the background
+### Architecture
+- **TrafficService.java**: Background service generating traffic.
+  - **GET Requests**: HTTPS requests to URLs from `SharedPreferences` (`urlsToVisit`) with 10–30s delays.
+  - **POST Requests**: 20% chance, mimicking form submissions (`dummy=1`).
+  - **Google Analytics**: 30% chance, requests to `google-analytics.com/collect`.
+  - **Resources**: Loads CSS, JS, images (up to 10, HTTPS) with 0.1–1s delays.
+  - **DoH**: Supports Google, Cloudflare, Quad9 with automatic switching and fallback to system DNS (port 53).
+- **MainActivity.java**: UI for control (enable/disable traffic, DoH, URL input).
+- **config.json**: Configures `userAgents`, `blacklistedUrls`, `timeout`.
 
-- Built in Java
+### Security
+- **Zero-Click**: JS is downloaded but not executed (`response.body().string()`). SVG not processed.
+- **Filtering**: HTTPS-only, blacklisted domains (`isBlacklisted`).
+- **Logs**: Disabled in release via `proguard-rules.pro`.
 
-<!-- INSTALLATION -->
-## Installation:
+### Traffic Naturalness
+- **Surface DPI**: 95–98% (HTTPS, system DNS, resources, Google Analytics).
+- **Deep Analysis**: 85–90% (fixed `Referer`, simplistic POST).
+- **Censored Regions**: 85–90% (system DNS), 75–80% (DoH). DoH may be flagged as circumvention.
 
-[Download](https://github.com/umutcamliyurt/MockTraffic/releases)
+### Limitations
+- Fixed `Referer` (`https://www.google.com/`).
+- Simplistic POST body (`dummy=1`).
+- No AJAX/WebSocket support.
+- Requests to authenticated pages (e.g., `vk.com/feed`) return 401/403 but raise minimal suspicion.
 
-<!-- SCREENSHOT -->
-## Screenshot:
+## Installation
+1. Clone the repository: `git clone <repo-url>`.
+2. Build the project: ./gradlew build.
+3. Install APK on Android (minSdk 24).
 
-<img src="image.png" width="400" height="800" />
+## Testing
+- Wireshark: Verify HTTPS (port 443), DNS (port 53), Google Analytics.
+- UI: Test enable/disable DoH, URL input (vk.com, google.com).
+- Logs: Ensure Log.d is disabled in release.
 
-<!-- LICENSE -->
-## License
+## Wanna Improvements
+- Dynamic Referer from lastVisitedUrls.
+- Complex POST parameters (search=query&csrf_token=xyz).
+- Whitelist domains (vk.com, google.com).
+- Support AJAX/WebSocket.
+- Filter authenticated pages (/feed, /mail).
 
-Distributed under the MIT License. See `LICENSE` for more information.
+## Authors
+
+????
