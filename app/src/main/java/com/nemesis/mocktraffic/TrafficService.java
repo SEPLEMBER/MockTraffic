@@ -16,8 +16,8 @@ import android.os.IBinder;
 import android.util.Log;
 
 import androidx.annotation.Nullable;
-import androidx.core.app.ActivityCompat;
 import androidx.core.app.NotificationCompat;
+import androidx.core.content.ContextCompat;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -94,7 +94,7 @@ public class TrafficService extends Service {
         createNotificationChannel();
         loadConfigFromAssets();
         loadUserUrls();
-        registerReceiver(configReceiver, new IntentFilter(RELOAD_CONFIG_ACTION), ActivityCompat.RECEIVER_NOT_EXPORTED);
+        ContextCompat.registerReceiver(this, configReceiver, new IntentFilter(RELOAD_CONFIG_ACTION), ContextCompat.RECEIVER_NOT_EXPORTED);
     }
 
     private void createNotificationChannel() {
@@ -146,7 +146,7 @@ public class TrafficService extends Service {
 
     @Override
     public void onDestroy() {
-        unregisterReceiver(configReceiver);
+        ContextCompat.unregisterReceiver(this, configReceiver);
         stopTraffic();
         Log.d("TrafficService", "Service destroyed.");
         super.onDestroy();
