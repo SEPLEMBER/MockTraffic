@@ -1,17 +1,5 @@
 {
-    "max_depth": 25,
-    "min_sleep": 3000,
-    "max_sleep": 6000,
     "timeout": 60000,
-    "root_urls": [
-        "https://www.ecosia.org",
-        "https://www.google.com",
-        "https://wikipedia.org",
-        "https://github.com",
-        "https://www.aliexpress.com",
-        "https://www.twitch.tv",
-        "https://www.adobe.com"
-    ],
     "blacklisted_urls": [
         "https://t.co",
         "t.umblr.com",
