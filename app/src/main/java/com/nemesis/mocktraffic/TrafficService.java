@@ -146,7 +146,7 @@ public class TrafficService extends Service {
 
     @Override
     public void onDestroy() {
-        ContextCompat.unregisterReceiver(this, configReceiver);
+        unregisterReceiver(configReceiver);
         stopTraffic();
         Log.d("TrafficService", "Service destroyed.");
         super.onDestroy();
