@@ -15,6 +15,7 @@ import android.provider.Settings;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -24,7 +25,7 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
 import org.json.JSONArray;
-import org.json.JSONException;
+import org.json.JSONJSONEception;
 
 import java.util.ArrayList;
 
@@ -36,9 +37,12 @@ public class MainActivity extends AppCompatActivity {
     private CheckBox trafficCheckBox;
     private TextView trafficStatsTextView;
     private TextView statusTextView;
+    private TextView lastUrlsTextView;
     private EditText urlInput;
     private Button addUrlButton;
     private Button clearUrlButton;
+    private SeekBar speedSeekBar;
+    private TextView speedTextView;
 
     private BroadcastReceiver statsReceiver = new BroadcastReceiver() {
         @Override
@@ -48,10 +52,9 @@ public class MainActivity extends AppCompatActivity {
                 trafficStatsTextView.setText("Traffic Stats: " + requestCount + " requests");
                 ArrayList<String> lastUrls = intent.getStringArrayListExtra("lastUrls");
                 if (lastUrls != null && !lastUrls.isEmpty()) {
-                    statusTextView.setText("Last URLs: " + String.join(", ", lastUrls));
+                    lastUrlsTextView.setText("Last URLs: " + String.join("\n", lastUrls));
                 }
 
-                // Save request count to SharedPreferences
                 SharedPreferences preferences = getSharedPreferences("app_prefs", MODE_PRIVATE);
                 SharedPreferences.Editor editor = preferences.edit();
                 editor.putInt("request_count", requestCount);
@@ -65,41 +68,57 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // Initialize UI elements
         trafficCheckBox = findViewById(R.id.trafficCheckBox);
         trafficStatsTextView = findViewById(R.id.trafficStatsTextView);
         statusTextView = findViewById(R.id.statusTextView);
+        lastUrlsTextView = findViewById(R.id.lastUrlsTextView);
         urlInput = findViewById(R.id.urlInput);
-        addUrlButton = findViewById(R.id.addUrlButton);
+        add1UrlButton = findViewById(R.id.addUrlButton);
         clearUrlButton = findViewById(R.id.clearUrlButton);
+        speedSeekBar = findViewById(R.id.speedSeekBar);
+        speedTextView = findViewById(R.id.speedTextView);
 
-        // Restore saved traffic generation setting
         SharedPreferences preferences = getSharedPreferences("app_prefs", MODE_PRIVATE);
         boolean trafficEnabled = preferences.getBoolean("traffic_enabled", false);
         trafficCheckBox.setChecked(trafficEnabled);
 
-        // Restore the saved request count
         int savedRequestCount = preferences.getInt("request_count", 0);
         trafficStatsTextView.setText("Traffic Stats: " + savedRequestCount + " requests");
 
-        // Check and request POST_NOTIFICATIONS permission if needed
+        int savedDelay = preferences.getInt("request_delay", 5);
+        speedSeekBar.setProgress(savedDelay - 1);
+        speedTextView.setText("Request Delay: " + savedDelay + "s");
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQUEST_POST_NOTIFICATIONS);
             }
         }
 
-        // Add URL button listener
+        speedSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                int delay = progress + 1;
+                speedTextView.setText("Request Delay: " + delay + "s");
+                preferences.edit().putInt("request_delay", delay).apply();
+                restartTrafficService();
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+
         addUrlButton.setOnClickListener(v -> {
             String url = urlInput.getText().toString().trim();
             if (url.startsWith("https://")) {
-                SharedPreferences prefs = getSharedPreferences("app_prefs", MODE_PRIVATE);
-                String userUrlsJson = prefs.getString("user_urls", "[]");
+                String userUrlsJson = preferences.getString("user_urls", "[]");
                 try {
                     JSONArray userUrls = new JSONArray(userUrlsJson);
                     if (!containsUrl(userUrls, url)) {
                         userUrls.put(url);
-                        prefs.edit().putString("user_urls", userUrls.toString()).apply();
+                        preferences.edit().putString("user_urls", userUrls.toString()).apply();
                         urlInput.setText("");
                         Toast.makeText(this, "URL added", Toast.LENGTH_SHORT).show();
                         restartTrafficService();
@@ -114,20 +133,14 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // Clear URLs button listener
         clearUrlButton.setOnClickListener(v -> {
-            SharedPreferences prefs = getSharedPreferences("app_prefs", MODE_PRIVATE);
-            prefs.edit().putString("user_urls", "[]").apply();
+            preferences.edit().putString("user_urls", "[]").apply();
             Toast.makeText(this, "URLs cleared", Toast.LENGTH_SHORT).show();
             restartTrafficService();
         });
 
-        // Toggle traffic generation when checkbox is clicked
         trafficCheckBox.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            SharedPreferences.Editor editor = preferences.edit();
-            editor.putBoolean("traffic_enabled", isChecked);
-            editor.apply();
-
+            preferences.edit().putBoolean("traffic_enabled", isChecked).apply();
             if (isChecked) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
