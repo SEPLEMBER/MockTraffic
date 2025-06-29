@@ -12,7 +12,9 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.PowerManager;
 import android.provider.Settings;
+import android.widget.Button;
 import android.widget.CheckBox;
+import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -20,6 +22,11 @@ import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+
+import java.util.ArrayList;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -29,6 +36,9 @@ public class MainActivity extends AppCompatActivity {
     private CheckBox trafficCheckBox;
     private TextView trafficStatsTextView;
     private TextView statusTextView;
+    private EditText urlInput;
+    private Button addUrlButton;
+    private Button clearUrlButton;
 
     private BroadcastReceiver statsReceiver = new BroadcastReceiver() {
         @Override
@@ -36,6 +46,10 @@ public class MainActivity extends AppCompatActivity {
             if (TrafficService.ACTION_UPDATE_STATS.equals(intent.getAction())) {
                 int requestCount = intent.getIntExtra("requestCount", 0);
                 trafficStatsTextView.setText("Traffic Stats: " + requestCount + " requests");
+                ArrayList<String> lastUrls = intent.getStringArrayListExtra("lastUrls");
+                if (lastUrls != null && !lastUrls.isEmpty()) {
+                    statusTextView.setText("Last URLs: " + String.join(", ", lastUrls));
+                }
 
                 // Save request count to SharedPreferences
                 SharedPreferences preferences = getSharedPreferences("app_prefs", MODE_PRIVATE);
@@ -55,6 +69,9 @@ public class MainActivity extends AppCompatActivity {
         trafficCheckBox = findViewById(R.id.trafficCheckBox);
         trafficStatsTextView = findViewById(R.id.trafficStatsTextView);
         statusTextView = findViewById(R.id.statusTextView);
+        urlInput = findViewById(R.id.urlInput);
+        addUrlButton = findViewById(R.id.addUrlButton);
+        clearUrlButton = findViewById(R.id.clearUrlButton);
 
         // Restore saved traffic generation setting
         SharedPreferences preferences = getSharedPreferences("app_prefs", MODE_PRIVATE);
@@ -66,41 +83,70 @@ public class MainActivity extends AppCompatActivity {
         trafficStatsTextView.setText("Traffic Stats: " + savedRequestCount + " requests");
 
         // Check and request POST_NOTIFICATIONS permission if needed
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) { // Android 13+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQUEST_POST_NOTIFICATIONS);
             }
         }
 
+        // Add URL button listener
+        addUrlButton.setOnClickListener(v -> {
+            String url = urlInput.getText().toString().trim();
+            if (url.startsWith("https://")) {
+                SharedPreferences prefs = getSharedPreferences("app_prefs", MODE_PRIVATE);
+                String userUrlsJson = prefs.getString("user_urls", "[]");
+                try {
+                    JSONArray userUrls = new JSONArray(userUrlsJson);
+                    if (!containsUrl(userUrls, url)) {
+                        userUrls.put(url);
+                        prefs.edit().putString("user_urls", userUrls.toString()).apply();
+                        urlInput.setText("");
+                        Toast.makeText(this, "URL added", Toast.LENGTH_SHORT).show();
+                        restartTrafficService();
+                    } else {
+                        Toast.makeText(this, "URL already exists", Toast.LENGTH_SHORT).show();
+                    }
+                } catch (JSONException e) {
+                    Log.e("MainActivity", "Error updating URLs", e);
+                }
+            } else {
+                Toast.makeText(this, "Only HTTPS URLs allowed", Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        // Clear URLs button listener
+        clearUrlButton.setOnClickListener(v -> {
+            SharedPreferences prefs = getSharedPreferences("app_prefs", MODE_PRIVATE);
+            prefs.edit().putString("user_urls", "[]").apply();
+            Toast.makeText(this, "URLs cleared", Toast.LENGTH_SHORT).show();
+            restartTrafficService();
+        });
+
         // Toggle traffic generation when checkbox is clicked
         trafficCheckBox.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            // Save the traffic generation setting
             SharedPreferences.Editor editor = preferences.edit();
             editor.putBoolean("traffic_enabled", isChecked);
             editor.apply();
 
             if (isChecked) {
-                // Check if POST_NOTIFICATIONS permission is granted (Android 13+)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                        Toast.makeText(this, "Notification permission required to enable traffic generation.", Toast.LENGTH_LONG).show();
+                        Toast.makeText(this, "Notification permission required.", Toast.LENGTH_LONG).show();
                         trafficCheckBox.setChecked(false);
                         return;
                     }
                 }
 
-                // Request to ignore battery optimizations
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) { // Android 6.0+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
                     if (pm != null && !pm.isIgnoringBatteryOptimizations(getPackageName())) {
                         Intent intentExempt = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
                         intentExempt.setData(android.net.Uri.parse("package:" + getPackageName()));
                         startActivityForResult(intentExempt, REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
-                        return; // Wait for user to respond
+                        return;
                     }
                 }
 
-                // Start the TrafficService
                 Intent serviceIntent = new Intent(this, TrafficService.class);
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     startForegroundService(serviceIntent);
@@ -110,7 +156,6 @@ public class MainActivity extends AppCompatActivity {
                 Toast.makeText(this, "Traffic Generation Enabled", Toast.LENGTH_SHORT).show();
                 statusTextView.setText("Traffic Generation Enabled");
             } else {
-                // Stop the TrafficService
                 Intent serviceIntent = new Intent(this, TrafficService.class);
                 stopService(serviceIntent);
                 Toast.makeText(this, "Traffic Generation Disabled", Toast.LENGTH_SHORT).show();
@@ -119,52 +164,64 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    private boolean containsUrl(JSONArray urls, String url) throws JSONException {
+        for (int i = 0; i < urls.length(); i++) {
+            if (urls.getString(i).equals(url)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void restartTrafficService() {
+        Intent serviceIntent = new Intent(this, TrafficService.class);
+        stopService(serviceIntent);
+        if (trafficCheckBox.isChecked()) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent);
+            } else {
+                startService(serviceIntent);
+            }
+        }
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
-        // Register the receiver
         IntentFilter filter = new IntentFilter(TrafficService.ACTION_UPDATE_STATS);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {  // Android 13 and above
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(statsReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
         } else {
-            registerReceiver(statsReceiver, filter); // Older versions
+            registerReceiver(statsReceiver, filter);
         }
     }
 
     @Override
     protected void onPause() {
         super.onPause();
-        // Unregister the receiver to prevent leaks
         unregisterReceiver(statsReceiver);
     }
 
-    // Handle the result of permission requests
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQUEST_POST_NOTIFICATIONS) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                // Permission granted; no action needed
                 Toast.makeText(this, "Notification permission granted.", Toast.LENGTH_SHORT).show();
             } else {
-                // Permission denied
-                Toast.makeText(this, "Notification permission denied. Cannot enable traffic generation.", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "Notification permission denied.", Toast.LENGTH_LONG).show();
                 trafficCheckBox.setChecked(false);
             }
         }
     }
 
-    // Handle the result of battery optimization exemption request
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQUEST_IGNORE_BATTERY_OPTIMIZATIONS) {
             PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
             if (pm != null && pm.isIgnoringBatteryOptimizations(getPackageName())) {
-                // User granted exemption
                 Toast.makeText(this, "Battery optimization exemption granted.", Toast.LENGTH_SHORT).show();
-
-                // Start the TrafficService
                 Intent serviceIntent = new Intent(this, TrafficService.class);
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     startForegroundService(serviceIntent);
@@ -173,14 +230,11 @@ public class MainActivity extends AppCompatActivity {
                 }
                 statusTextView.setText("Traffic Generation Enabled");
             } else {
-                // User denied exemption
-                Toast.makeText(this, "Battery optimization exemption denied. Traffic generation may be limited.", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "Battery optimization exemption denied.", Toast.LENGTH_LONG).show();
                 trafficCheckBox.setChecked(false);
-
-                // Optionally, show a dialog explaining why the exemption is needed
                 new AlertDialog.Builder(this)
                         .setTitle("Battery Optimization")
-                        .setMessage("To ensure reliable traffic generation, please allow the app to ignore battery optimizations in settings.")
+                        .setMessage("Please allow the app to ignore battery optimizations.")
                         .setPositiveButton("Open Settings", (dialog, which) -> {
                             Intent intentExempt = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
                             startActivity(intentExempt);
