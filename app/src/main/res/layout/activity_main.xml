@@ -1,18 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:padding="16dp">
 
-    <!-- Center the CheckBox in the parent -->
+    <!-- CheckBox to enable/disable traffic generation -->
     <CheckBox
         android:id="@+id/trafficCheckBox"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="Enable Traffic Generation"
         android:layout_centerHorizontal="true"
-        android:layout_centerVertical="true" />
+        android:layout_marginTop="16dp" />
 
-    <!-- Center the TextView below the CheckBox -->
+    <!-- TextView for status -->
     <TextView
         android:id="@+id/statusTextView"
         android:layout_width="wrap_content"
@@ -22,7 +23,7 @@
         android:layout_marginTop="16dp"
         android:layout_centerHorizontal="true" />
 
-    <!-- Add a TextView to show traffic statistics -->
+    <!-- TextView for traffic statistics -->
     <TextView
         android:id="@+id/trafficStatsTextView"
         android:layout_width="wrap_content"
@@ -31,5 +32,44 @@
         android:layout_below="@id/statusTextView"
         android:layout_marginTop="16dp"
         android:layout_centerHorizontal="true" />
-</RelativeLayout>
 
+    <!-- TextView for last visited URLs -->
+    <TextView
+        android:id="@+id/lastUrlsTextView"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Last Visited URLs: None"
+        android:layout_below="@id/trafficStatsTextView"
+        android:layout_marginTop="16dp"
+        android:layout_centerHorizontal="true" />
+
+    <!-- EditText for URL input -->
+    <EditText
+        android:id="@+id/urlInput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Enter HTTPS URL"
+        android:inputType="textUri"
+        android:layout_below="@id/lastUrlsTextView"
+        android:layout_marginTop="16dp" />
+
+    <!-- Button to add URL -->
+    <Button
+        android:id="@+id/addUrlButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Add URL"
+        android:layout_below="@id/urlInput"
+        android:layout_marginTop="8dp"
+        android:layout_centerHorizontal="true" />
+
+    <!-- Button to clear URLs -->
+    <Button
+        android:id="@+id/clearUrlButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Clear URLs"
+        android:layout_below="@id/addUrlButton"
+        android:layout_marginTop="8dp"
+        android:layout_centerHorizontal="true" />
+</RelativeLayout>
