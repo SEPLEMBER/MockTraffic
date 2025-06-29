@@ -5,15 +5,18 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.res.AssetManager;
 import android.os.Build;
-import android.os.Handler;
 import android.os.IBinder;
 import android.util.Log;
 
 import androidx.annotation.Nullable;
+import androidx.core.app.ActivityCompat;
 import androidx.core.app.NotificationCompat;
 
 import org.json.JSONArray;
@@ -29,20 +32,29 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.InetAddress;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import okhttp3.Call;
 import okhttp3.Callback;
+import okhttp3.Dns;
+import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
+import okhttp3.dnsoverhttps.DnsOverHttps;
 
 public class TrafficService extends Service {
 
     private static final String CHANNEL_ID = "TrafficServiceChannel";
     private static final int NOTIFICATION_ID = 1;
     public static final String ACTION_UPDATE_STATS = "com.nemesis.mocktraffic.ACTION_UPDATE_STATS";
+    private static final String RELOAD_CONFIG_ACTION = "com.nemesis.mocktraffic.RELOAD_CONFIG";
 
     private boolean isTrafficEnabled = true;
     private int requestCount = 0;
@@ -51,17 +63,30 @@ public class TrafficService extends Service {
     private List<String> userAgents = new ArrayList<>();
     private List<String> lastVisitedUrls = new ArrayList<>();
     private int timeout = 60000;
-    private Handler trafficHandler = new Handler();
-    private Handler logCleanerHandler = new Handler();
-    private OkHttpClient httpClient = new OkHttpClient.Builder()
-            .cache(null)
-            .build();
+    private ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     private Random random = new Random();
     private static final int LOG_CLEAN_INTERVAL = 30000;
     private static final int MAX_LAST_URLS = 5;
     private static final int MIN_DELAY_MS = 3000;
     private static final int MAX_DELAY_MS = 25000;
-    private static final int MAX_RESOURCES = 3; // Ограничение на количество ресурсов
+    private static final int MAX_RESOURCES = 3;
+    private static final long MAX_RESOURCE_SIZE = 1_000_000; // 1MB
+
+    private OkHttpClient httpClient = new OkHttpClient.Builder()
+            .cache(null)
+            .dns(new DnsOverHttps.Builder()
+                    .client(new OkHttpClient())
+                    .url(HttpUrl.parse("https://dns.google/resolve"))
+                    .build())
+            .build();
+
+    private BroadcastReceiver configReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            loadUserUrls();
+            Log.d("TrafficService", "URLs reloaded via broadcast.");
+        }
+    };
 
     @Override
     public void onCreate() {
@@ -70,6 +95,7 @@ public class TrafficService extends Service {
         createNotificationChannel();
         loadConfigFromAssets();
         loadUserUrls();
+        registerReceiver(configReceiver, new IntentFilter(RELOAD_CONFIG_ACTION), ActivityCompat.RECEIVER_NOT_EXPORTED);
     }
 
     private void createNotificationChannel() {
@@ -121,9 +147,10 @@ public class TrafficService extends Service {
 
     @Override
     public void onDestroy() {
-        super.onDestroy();
+        unregisterReceiver(configReceiver);
         stopTraffic();
         Log.d("TrafficService", "Service destroyed.");
+        super.onDestroy();
     }
 
     @Nullable
@@ -138,21 +165,19 @@ public class TrafficService extends Service {
             stopSelf();
             return;
         }
-        trafficHandler.post(trafficRunnable);
+        scheduler.schedule(trafficRunnable, getDelay(), TimeUnit.MILLISECONDS);
         scheduleLogCleaning();
         Log.d("TrafficService", "Traffic generation started.");
     }
 
     private void stopTraffic() {
-        trafficHandler.removeCallbacks(trafficRunnable);
-        logCleanerHandler.removeCallbacksAndMessages(null);
+        scheduler.shutdownNow();
         Log.d("TrafficService", "Traffic generation stopped.");
     }
 
     private Runnable trafficRunnable = new Runnable() {
         @Override
         public void run() {
-            Log.d("TrafficService", "Traffic runnable started. URLs to visit: " + urlsToVisit.size());
             if (isTrafficEnabled && !urlsToVisit.isEmpty()) {
                 String urlToVisit = urlsToVisit.get(random.nextInt(urlsToVisit.size()));
                 String ipAddress = getIpAddress(urlToVisit);
@@ -165,9 +190,7 @@ public class TrafficService extends Service {
                     }
                     broadcastStats();
                 }
-                long delay = getDelay();
-                Log.d("TrafficService", "Scheduling next request in " + delay + "ms");
-                trafficHandler.postDelayed(this, delay);
+                scheduler.schedule(this, getDelay(), TimeUnit.MILLISECONDS);
             } else {
                 Log.d("TrafficService", "Traffic generation stopped or no URLs.");
                 stopSelf();
@@ -176,7 +199,9 @@ public class TrafficService extends Service {
     };
 
     private long getDelay() {
-        return MIN_DELAY_MS + random.nextInt(MAX_DELAY_MS - MIN_DELAY_MS + 1);
+        int base = 10000; // 10 секунд
+        int variation = random.nextInt(7000) - 2000; // -2с до +5с
+        return Math.max(MIN_DELAY_MS, Math.min(MAX_DELAY_MS, base + variation));
     }
 
     private String getIpAddress(String url) {
@@ -202,7 +227,9 @@ public class TrafficService extends Service {
                 .header("User-Agent", userAgent)
                 .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 .header("Accept-Language", "en-US,en;q=0.5")
+                .header("Accept-Encoding", "gzip, deflate, br")
                 .header("Connection", "keep-alive")
+                .header("Referer", "https://www.google.com/")
                 .build();
 
         httpClient.newCall(request).enqueue(new Callback() {
@@ -217,7 +244,7 @@ public class TrafficService extends Service {
                     requestCount++;
                     Log.d("TrafficService", "Visited URL: " + url + " | Status: " + response.code());
                     String html = response.body().string();
-                    loadSafeResources(url, html); // Загружаем безопасные ресурсы
+                    loadSafeResources(url, html);
                 } else {
                     Log.e("TrafficService", "Failed to visit URL: " + url + " | Status: " + response.code());
                 }
@@ -229,19 +256,23 @@ public class TrafficService extends Service {
     private void loadSafeResources(String baseUrl, String html) {
         try {
             Document doc = Jsoup.parse(html, baseUrl);
-            // Извлекаем CSS и изображения
             Elements resources = doc.select("link[href$=.css], img[src$=.png], img[src$=.jpg], img[src$=.jpeg], img[src$=.gif]");
+            List<org.jsoup.nodes.Element> resourceList = resources.stream().collect(Collectors.toList());
+            Collections.shuffle(resourceList, random);
             int count = 0;
-            for (org.jsoup.nodes.Element resource : resources) {
+            for (org.jsoup.nodes.Element resource : resourceList) {
                 if (count >= MAX_RESOURCES) break;
                 String resourceUrl = resource.attr("abs:href");
                 if (resourceUrl.isEmpty()) resourceUrl = resource.attr("abs:src");
                 if (resourceUrl.startsWith("https://") && !isBlacklisted(resourceUrl)) {
+                    String userAgent = userAgents.get(random.nextInt(userAgents.size()));
                     Request resourceRequest = new Request.Builder()
                             .url(resourceUrl)
-                            .header("User-Agent", userAgents.get(random.nextInt(userAgents.size())))
+                            .header("User-Agent", userAgent)
                             .header("Accept", resourceUrl.endsWith(".css") ? "text/css" : "image/*")
+                            .header("Accept-Encoding", "gzip, deflate, br")
                             .header("Connection", "keep-alive")
+                            .header("Referer", baseUrl)
                             .build();
                     httpClient.newCall(resourceRequest).enqueue(new Callback() {
                         @Override
@@ -251,7 +282,14 @@ public class TrafficService extends Service {
 
                         @Override
                         public void onResponse(Call call, Response response) throws IOException {
-                            Log.d("TrafficService", "Loaded resource: " + resourceUrl + " | Status: " + response.code());
+                            if (response.isSuccessful()) {
+                                String contentLength = response.header("Content-Length");
+                                if (contentLength != null && Long.parseLong(contentLength) > MAX_RESOURCE_SIZE) {
+                                    Log.d("TrafficService", "Skipped large resource: " + resourceUrl);
+                                    return;
+                                }
+                                Log.d("TrafficService", "Loaded resource: " + resourceUrl + " | Status: " + response.code());
+                            }
                             response.close();
                         }
                     });
@@ -273,13 +311,10 @@ public class TrafficService extends Service {
     }
 
     private void scheduleLogCleaning() {
-        logCleanerHandler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                Log.d("TrafficService", "Log cleaned.");
-                logCleanerHandler.postDelayed(this, LOG_CLEAN_INTERVAL);
-            }
-        }, LOG_CLEAN_INTERVAL);
+        scheduler.schedule(() -> {
+            Log.d("TrafficService", "Log cleaned.");
+            scheduleLogCleaning();
+        }, LOG_CLEAN_INTERVAL, TimeUnit.MILLISECONDS);
     }
 
     private void loadConfigFromAssets() {
