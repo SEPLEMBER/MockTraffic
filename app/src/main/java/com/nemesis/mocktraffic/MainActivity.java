@@ -12,12 +12,15 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.PowerManager;
 import android.provider.Settings;
+import android.util.Log;
+import android.util.Patterns;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
-import android.util.Log;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
@@ -28,6 +31,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -35,8 +39,20 @@ public class MainActivity extends AppCompatActivity {
     private static final int REQUEST_IGNORE_BATTERY_OPTIMIZATIONS = 2;
     private static final String PREFS_NAME = "app_prefs";
     private static final String URLS_KEY = "user_urls";
+    private static final String[] DOH_PROVIDERS = {
+            "https://dns.google/resolve",
+            "https://cloudflare-dns.com/dns-query",
+            "https://dns.quad9.net/dns-query"
+    };
+    private static final String[] DOH_PROVIDER_NAMES = {
+            "Google DNS",
+            "Cloudflare DNS",
+            "Quad9 DNS"
+    };
 
     private CheckBox trafficCheckBox;
+    private CheckBox dohCheckBox;
+    private Spinner dohProviderSpinner;
     private TextView trafficStatsTextView;
     private TextView statusTextView;
     private TextView lastUrlsTextView;
@@ -66,6 +82,8 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         trafficCheckBox = findViewById(R.id.trafficCheckBox);
+        dohCheckBox = findViewById(R.id.dohCheckBox);
+        dohProviderSpinner = findViewById(R.id.dohProviderSpinner);
         trafficStatsTextView = findViewById(R.id.trafficStatsTextView);
         statusTextView = findViewById(R.id.statusTextView);
         lastUrlsTextView = findViewById(R.id.lastUrlsTextView);
@@ -75,7 +93,16 @@ public class MainActivity extends AppCompatActivity {
 
         SharedPreferences preferences = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         boolean trafficEnabled = preferences.getBoolean("traffic_enabled", false);
+        boolean dohEnabled = preferences.getBoolean("doh_enabled", true);
+        String selectedDohProvider = preferences.getString("doh_provider", DOH_PROVIDERS[0]);
+
         trafficCheckBox.setChecked(trafficEnabled);
+        dohCheckBox.setChecked(dohEnabled);
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, DOH_PROVIDER_NAMES);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        dohProviderSpinner.setAdapter(adapter);
+        dohProviderSpinner.setSelection(Arrays.asList(DOH_PROVIDERS).indexOf(selectedDohProvider));
+        dohProviderSpinner.setEnabled(dohEnabled);
 
         int savedRequestCount = preferences.getInt("request_count", 0);
         trafficStatsTextView.setText("Traffic Stats: " + savedRequestCount + " requests");
@@ -92,24 +119,24 @@ public class MainActivity extends AppCompatActivity {
                 Toast.makeText(this, "Enter a URL", Toast.LENGTH_SHORT).show();
                 return;
             }
-            if (url.startsWith("https://")) {
-                String userUrlsJson = preferences.getString(URLS_KEY, "[]");
-                try {
-                    JSONArray userUrls = new JSONArray(userUrlsJson);
-                    if (!containsUrl(userUrls, url)) {
-                        userUrls.put(url);
-                        preferences.edit().putString(URLS_KEY, userUrls.toString()).apply();
-                        urlInput.setText("");
-                        Toast.makeText(this, "URL added", Toast.LENGTH_SHORT).show();
-                        reloadTrafficService();
-                    } else {
-                        Toast.makeText(this, "URL already exists", Toast.LENGTH_SHORT).show();
-                    }
-                } catch (JSONException e) {
-                    Log.e("MainActivity", "Error updating URLs", e);
+            if (!Patterns.WEB_URL.matcher(url).matches() || !url.startsWith("https://")) {
+                Toast.makeText(this, "Invalid HTTPS URL", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            String userUrlsJson = preferences.getString(URLS_KEY, "[]");
+            try {
+                JSONArray userUrls = new JSONArray(userUrlsJson);
+                if (!containsUrl(userUrls, url)) {
+                    userUrls.put(url);
+                    preferences.edit().putString(URLS_KEY, userUrls.toString()).apply();
+                    urlInput.setText("");
+                    Toast.makeText(this, "URL added", Toast.LENGTH_SHORT).show();
+                    reloadTrafficService();
+                } else {
+                    Toast.makeText(this, "URL already exists", Toast.LENGTH_SHORT).show();
                 }
-            } else {
-                Toast.makeText(this, "Only HTTPS URLs allowed", Toast.LENGTH_SHORT).show();
+            } catch (JSONException e) {
+                Log.e("MainActivity", "Error updating URLs", e);
             }
         });
 
@@ -117,6 +144,27 @@ public class MainActivity extends AppCompatActivity {
             preferences.edit().putString(URLS_KEY, "[]").apply();
             Toast.makeText(this, "URLs cleared", Toast.LENGTH_SHORT).show();
             reloadTrafficService();
+        });
+
+        dohCheckBox.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            preferences.edit().putBoolean("doh_enabled", isChecked).apply();
+            dohProviderSpinner.setEnabled(isChecked);
+            reloadTrafficService();
+            Toast.makeText(this, "DoH " + (isChecked ? "enabled" : "disabled"), Toast.LENGTH_SHORT).show();
+        });
+
+        dohProviderSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(android.widget.AdapterView<?> parent, android.view.View view, int position, long id) {
+                preferences.edit().putString("doh_provider", DOH_PROVIDERS[position]).apply();
+                reloadTrafficService();
+                Toast.makeText(MainActivity.this, "Selected DoH provider: " + DOH_PROVIDER_NAMES[position], Toast.LENGTH_SHORT).show();
+            }
+
+            @Override
+            public void onNothingSelected(android.widget.AdapterView<?> parent) {
+                // No action needed
+            }
         });
 
         trafficCheckBox.setOnCheckedChangeListener((buttonView, isChecked) -> {
