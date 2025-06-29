@@ -32,6 +32,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.InetAddress;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Random;
@@ -42,6 +43,7 @@ import java.util.stream.Collectors;
 
 import okhttp3.Call;
 import okhttp3.Callback;
+import okhttp3.Dns;
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -71,19 +73,19 @@ public class TrafficService extends Service {
     private static final int MAX_RESOURCES = 3;
     private static final long MAX_RESOURCE_SIZE = 1_000_000; // 1MB
 
-    private OkHttpClient httpClient = new OkHttpClient.Builder()
-            .cache(null)
-            .dns(new DnsOverHttps.Builder()
-                    .client(new OkHttpClient())
-                    .url(HttpUrl.parse("https://dns.google/resolve"))
-                    .build())
-            .build();
+    private static final List<String> DOH_PROVIDERS = Arrays.asList(
+            "https://dns.google/resolve",
+            "https://cloudflare-dns.com/dns-query",
+            "https://dns.quad9.net/dns-query"
+    );
+    private OkHttpClient httpClient;
 
     private BroadcastReceiver configReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
             loadUserUrls();
-            Log.d("TrafficService", "URLs reloaded via broadcast.");
+            configureHttpClient();
+            Log.d("TrafficService", "URLs and DNS settings reloaded via broadcast.");
         }
     };
 
@@ -94,7 +96,51 @@ public class TrafficService extends Service {
         createNotificationChannel();
         loadConfigFromAssets();
         loadUserUrls();
+        configureHttpClient();
         ContextCompat.registerReceiver(this, configReceiver, new IntentFilter(RELOAD_CONFIG_ACTION), ContextCompat.RECEIVER_NOT_EXPORTED);
+    }
+
+    private void configureHttpClient() {
+        SharedPreferences prefs = getSharedPreferences("app_prefs", MODE_PRIVATE);
+        boolean dohEnabled = prefs.getBoolean("doh_enabled", true);
+        String selectedDohProvider = prefs.getString("doh_provider", DOH_PROVIDERS.get(0));
+
+        OkHttpClient.Builder builder = new OkHttpClient.Builder()
+                .cache(null);
+
+        if (dohEnabled && testDohProvider(selectedDohProvider)) {
+            builder.dns(new DnsOverHttps.Builder()
+                    .client(new OkHttpClient())
+                    .url(HttpUrl.parse(selectedDohProvider))
+                    .build());
+            Log.d("TrafficService", "Using DoH provider: " + selectedDohProvider);
+        } else {
+            builder.dns(Dns.SYSTEM);
+            Log.d("TrafficService", "DoH disabled or provider unreachable, using system DNS.");
+        }
+
+        httpClient = builder.build();
+    }
+
+    private boolean testDohProvider(String providerUrl) {
+        try {
+            OkHttpClient testClient = new OkHttpClient.Builder()
+                    .dns(new DnsOverHttps.Builder()
+                            .client(new OkHttpClient())
+                            .url(HttpUrl.parse(providerUrl))
+                            .build())
+                    .build();
+            Request testRequest = new Request.Builder()
+                    .url("https://example.com")
+                    .build();
+            Response response = testClient.newCall(testRequest).execute();
+            boolean isSuccessful = response.isSuccessful();
+            response.close();
+            return isSuccessful;
+        } catch (IOException e) {
+            Log.e("TrafficService", "DoH provider test failed for: " + providerUrl, e);
+            return false;
+        }
     }
 
     private void createNotificationChannel() {
