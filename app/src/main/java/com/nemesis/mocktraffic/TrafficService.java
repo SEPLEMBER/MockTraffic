@@ -19,6 +19,9 @@ import androidx.core.app.NotificationCompat;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.select.Elements;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -56,6 +59,9 @@ public class TrafficService extends Service {
     private Random random = new Random();
     private static final int LOG_CLEAN_INTERVAL = 30000;
     private static final int MAX_LAST_URLS = 5;
+    private static final int MIN_DELAY_MS = 3000;
+    private static final int MAX_DELAY_MS = 25000;
+    private static final int MAX_RESOURCES = 3; // Ограничение на количество ресурсов
 
     @Override
     public void onCreate() {
@@ -146,16 +152,6 @@ public class TrafficService extends Service {
     private Runnable trafficRunnable = new Runnable() {
         @Override
         public void run() {
-            SharedPreferences prefs = getSharedPreferences("app_prefs", MODE_PRIVATE);
-            int speed = prefs.getInt("request_speed", 1); // 0: fast, 1: medium, 2: slow
-            long delay;
-            switch (speed) {
-                case 0: delay = 1000; break; // Fast: 1s
-                case 1: delay = 3000; break; // Medium: 3s
-                case 2: delay = 6000; break; // Slow: 6s
-                default: delay = 3000; break;
-            }
-
             Log.d("TrafficService", "Traffic runnable started. URLs to visit: " + urlsToVisit.size());
             if (isTrafficEnabled && !urlsToVisit.isEmpty()) {
                 String urlToVisit = urlsToVisit.get(random.nextInt(urlsToVisit.size()));
@@ -169,6 +165,8 @@ public class TrafficService extends Service {
                     }
                     broadcastStats();
                 }
+                long delay = getDelay();
+                Log.d("TrafficService", "Scheduling next request in " + delay + "ms");
                 trafficHandler.postDelayed(this, delay);
             } else {
                 Log.d("TrafficService", "Traffic generation stopped or no URLs.");
@@ -176,6 +174,10 @@ public class TrafficService extends Service {
             }
         }
     };
+
+    private long getDelay() {
+        return MIN_DELAY_MS + random.nextInt(MAX_DELAY_MS - MIN_DELAY_MS + 1);
+    }
 
     private String getIpAddress(String url) {
         try {
@@ -198,6 +200,9 @@ public class TrafficService extends Service {
         Request request = new Request.Builder()
                 .url(url)
                 .header("User-Agent", userAgent)
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .header("Accept-Language", "en-US,en;q=0.5")
+                .header("Connection", "keep-alive")
                 .build();
 
         httpClient.newCall(request).enqueue(new Callback() {
@@ -211,6 +216,8 @@ public class TrafficService extends Service {
                 if (response.isSuccessful()) {
                     requestCount++;
                     Log.d("TrafficService", "Visited URL: " + url + " | Status: " + response.code());
+                    String html = response.body().string();
+                    loadSafeResources(url, html); // Загружаем безопасные ресурсы
                 } else {
                     Log.e("TrafficService", "Failed to visit URL: " + url + " | Status: " + response.code());
                 }
@@ -219,9 +226,46 @@ public class TrafficService extends Service {
         });
     }
 
+    private void loadSafeResources(String baseUrl, String html) {
+        try {
+            Document doc = Jsoup.parse(html, baseUrl);
+            // Извлекаем CSS и изображения
+            Elements resources = doc.select("link[href$=.css], img[src$=.png], img[src$=.jpg], img[src$=.jpeg], img[src$=.gif]");
+            int count = 0;
+            for (org.jsoup.nodes.Element resource : resources) {
+                if (count >= MAX_RESOURCES) break;
+                String resourceUrl = resource.attr("abs:href");
+                if (resourceUrl.isEmpty()) resourceUrl = resource.attr("abs:src");
+                if (resourceUrl.startsWith("https://") && !isBlacklisted(resourceUrl)) {
+                    Request resourceRequest = new Request.Builder()
+                            .url(resourceUrl)
+                            .header("User-Agent", userAgents.get(random.nextInt(userAgents.size())))
+                            .header("Accept", resourceUrl.endsWith(".css") ? "text/css" : "image/*")
+                            .header("Connection", "keep-alive")
+                            .build();
+                    httpClient.newCall(resourceRequest).enqueue(new Callback() {
+                        @Override
+                        public void onFailure(Call call, IOException e) {
+                            Log.e("TrafficService", "Failed to load resource: " + resourceUrl, e);
+                        }
+
+                        @Override
+                        public void onResponse(Call call, Response response) throws IOException {
+                            Log.d("TrafficService", "Loaded resource: " + resourceUrl + " | Status: " + response.code());
+                            response.close();
+                        }
+                    });
+                    count++;
+                }
+            }
+        } catch (Exception e) {
+            Log.e("TrafficService", "Error parsing HTML for resources", e);
+        }
+    }
+
     private void broadcastStats() {
         Intent intent = new Intent(ACTION_UPDATE_STATS);
-        intent.setPackage(getPackageName()); // Fix for UnsafeImplicitIntentLaunch
+        intent.setPackage(getPackageName());
         intent.putExtra("requestCount", requestCount);
         intent.putStringArrayListExtra("lastUrls", new ArrayList<>(lastVisitedUrls));
         sendBroadcast(intent);
