@@ -16,9 +16,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         dependenciesInfo {
-            // Disables dependency metadata when building APKs.
             includeInApk = false
-            // Disables dependency metadata when building Android App Bundles.
             includeInBundle = false
         }
     }
@@ -39,11 +37,10 @@ android {
 }
 
 dependencies {
-
     implementation(libs.appcompat)
     implementation(libs.material)
     implementation(libs.okhttp)
-    implementation(libs.jsoup)
+    implementation("org.json:json:20230227")
     testImplementation(libs.junit)
     androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)
